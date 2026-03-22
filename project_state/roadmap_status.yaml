@@ -1,0 +1,131 @@
+project: mr-house-chatbot
+last_updated: "2026-02-25"
+current_phase: 3
+current_focus: "Phase 3 — LoRA fine-tuning with Llama 3.2 3B"
+
+phases:
+  phase_1_data:
+    name: "Dialogue Gathering & Persona Definition"
+    status: completed
+    owner: curator_agent
+    qa_support: persona_qa_agent
+    tasks:
+      - id: 1.1
+        task: "Collect Mr. House dialogue from Fallout Wiki"
+        status: completed
+        output: data/mr_house_dataset_final.jsonl
+        notes: "204 entries from raw wiki dialogue (3556 lines parsed)"
+      - id: 1.2
+        task: "Create character card with personality traits"
+        status: completed
+        output: persona/character_card.md
+        notes: "5 core traits, speech patterns, topic positions, example quotes, dying state"
+      - id: 1.3
+        task: "Format dialogue into instruction/output training pairs"
+        status: completed
+        output: data/mr_house_dataset_final.jsonl
+        notes: "204 deduplicated JSONL pairs + 70 greetings in data/mr_house_greetings.jsonl"
+      - id: 1.4
+        task: "QA pass on data quality and persona consistency"
+        status: completed
+        output: eval/persona_scores.csv
+        notes: "PASS — 0 out-of-character, 2 short, 0 dupes. Avg persona score 2.08/5"
+
+  phase_2_demo:
+    name: "Website Demo"
+    status: completed
+    owner: demo_agent
+    tasks:
+      - id: 2.1
+        task: "Set up Ollama with Mr. House Modelfile"
+        status: completed
+        notes: "llama3.2:3b base, custom Modelfile at demo/Modelfile"
+      - id: 2.2
+        task: "Build Gradio app with Lucky 38 monitor UI"
+        status: completed
+        notes: "demo/app.py — game-monitor aesthetic, greeting bank, streaming responses"
+      - id: 2.3
+        task: "Test system prompt with character card"
+        status: completed
+        notes: "Tested identity, democracy, casual speech rejection — all in character"
+
+  phase_2b_voice:
+    name: "Voice Input/Output"
+    status: completed
+    owner: demo_agent
+    tasks:
+      - id: 2B.1
+        task: "Install voice dependencies (Whisper STT + Piper TTS)"
+        status: completed
+        notes: "openai-whisper + piper-tts + en_US-lessac-medium voice model (60MB)"
+      - id: 2B.2
+        task: "Add voice I/O to Gradio app"
+        status: completed
+        notes: "demo/voice.py module + mic/audio components in demo/app.py"
+      - id: 2B.3
+        task: "Test voice loop end-to-end"
+        status: completed
+        notes: "TTS verified (276KB output), app loads with VOICE_ENABLED=True, API OK"
+
+  phase_3_finetune:
+    name: "Fine-Tuning with LoRA"
+    status: in_progress
+    owner: finetune_agent
+    qa_support: persona_qa_agent
+    tasks:
+      - id: 3.1
+        task: "Select base model"
+        status: completed
+        notes: "Llama 3.2 3B Instruct — best quality for 204 examples, ~2GB GGUF, 4-7 tok/s on Pi 5"
+      - id: 3.2
+        task: "Prepare LoRA training config"
+        status: completed
+        notes: "training/lora_config.yaml + training/colab_finetune.ipynb (Unsloth + SFTTrainer)"
+      - id: 3.3
+        task: "Train on Google Colab"
+        status: not_started
+      - id: 3.4
+        task: "Export to GGUF format"
+        status: not_started
+      - id: 3.5
+        task: "Run persona QA on fine-tuned model outputs"
+        status: not_started
+        output: eval/persona_scores.csv
+
+  phase_4_deploy:
+    name: "Raspberry Pi Deployment"
+    status: not_started
+    owner: pi_deploy_agent
+    tasks:
+      - id: 4.1
+        task: "Build llama.cpp for Pi 5"
+        status: not_started
+      - id: 4.2
+        task: "Tune quantization/context/threads for 8GB RAM"
+        status: not_started
+      - id: 4.3
+        task: "Create systemd service for auto-start"
+        status: not_started
+      - id: 4.4
+        task: "Write deployment runbook"
+        status: not_started
+        output: ops/deploy_pi.md
+
+next_action:
+  task_id: "3.3"
+  description: "Train on Google Colab — upload dataset and run notebook"
+  agent: finetune_agent
+
+blockers: []
+
+completed_deferred_tasks:
+  - id: D1
+    task: "Install Claude Code hooks after Phase 1 completes"
+    status: completed
+    installed: "2026-02-16"
+    config: ".claude/settings.json"
+    scripts:
+      - scripts/hooks/validate_jsonl.sh
+      - scripts/hooks/protect_character_card.sh
+      - scripts/hooks/enforce_state_read.sh
+      - scripts/hooks/restore_context.sh

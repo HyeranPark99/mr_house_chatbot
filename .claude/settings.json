@@ -1,0 +1,49 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "scripts/hooks/validate_jsonl.sh",
+            "timeout": 30,
+            "statusMessage": "Validating JSONL format..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "scripts/hooks/protect_character_card.sh",
+            "timeout": 10,
+            "statusMessage": "Checking character card permissions..."
+          },
+          {
+            "type": "command",
+            "command": "scripts/hooks/enforce_state_read.sh",
+            "timeout": 10,
+            "statusMessage": "Checking state read compliance..."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "scripts/hooks/restore_context.sh",
+            "timeout": 10,
+            "statusMessage": "Restoring project state after compaction..."
+          }
+        ]
+      }
+    ]
+  }
+}

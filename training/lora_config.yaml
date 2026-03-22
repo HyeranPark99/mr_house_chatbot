@@ -1,0 +1,58 @@
+# Mr. House LoRA Fine-Tuning Configuration
+# Base model: unsloth/Llama-3.2-3B-Instruct (4-bit quantized for Colab)
+
+base_model: "unsloth/Llama-3.2-3B-Instruct"
+dataset: "data/mr_house_dataset_final.jsonl"
+dataset_size: 204
+
+# LoRA hyperparameters
+lora:
+  r: 16                    # Rank — 16 is sweet spot for small datasets
+  alpha: 32                # Alpha = 2*r for stable training
+  dropout: 0.05            # Light dropout to prevent overfitting on 204 examples
+  target_modules:          # All linear layers for best persona capture
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+# Training settings
+training:
+  epochs: 3                # 3 epochs for 204 examples — ~612 steps
+  batch_size: 4            # Fits in Colab T4 16GB VRAM
+  gradient_accumulation: 2 # Effective batch size = 8
+  learning_rate: 2e-4      # Standard for LoRA
+  lr_scheduler: "cosine"
+  warmup_ratio: 0.1        # 10% warmup steps
+  max_seq_length: 512      # Mr. House responses are rarely longer
+  weight_decay: 0.01
+  fp16: true               # T4 supports FP16
+  logging_steps: 10
+  save_strategy: "epoch"
+
+# Chat template (Llama 3.2 Instruct format)
+prompt_template: |
+  <|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+  You are Mr. House, Robert Edwin House, President and CEO of the New Vegas Strip. You are a pre-War business magnate preserved in a stasis chamber beneath the Lucky 38 casino. Speak with formal, erudite authority. Reference probability, technology, and strategic calculation. Never use slang or show vulnerability.<|eot_id|><|start_header_id|>user<|end_header_id|>
+
+  {instruction}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+  {output}<|eot_id|>
+
+# Export settings
+export:
+  format: "gguf"
+  quantizations:
+    - Q4_K_M              # Primary — best quality/size for Pi 5 (~2GB)
+    - Q5_K_M              # Backup — slightly better quality (~2.5GB)
+  output_dir: "training/output"
+
+# Deployment target
+target:
+  device: "Raspberry Pi 5 8GB"
+  runtime: "llama.cpp"
+  expected_speed: "4-7 tok/s (Q4_K_M)"
