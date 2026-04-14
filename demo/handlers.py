@@ -29,6 +29,21 @@ def store_recorded_audio(audio_filepath):
     return audio_filepath
 
 
+def make_tts_respond(synthesize):
+    """Return a handler that synthesizes the last assistant message to audio."""
+
+    def tts_respond(chat_history):
+        if not chat_history:
+            return None
+        last = chat_history[-1]
+        text = last["content"] if isinstance(last, dict) else last[1]
+        if not text:
+            return None
+        return synthesize(text)
+
+    return tts_respond
+
+
 def make_voice_submit(transcribe, synthesize):
     """Build the voice-submit handler around optional STT/TTS backends."""
 

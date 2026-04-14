@@ -8,6 +8,7 @@ from gradio_patch import apply_patch
 from handlers import (
     bot_respond,
     clear_chat,
+    make_tts_respond,
     make_voice_submit,
     store_recorded_audio,
     user_submit,
@@ -32,6 +33,7 @@ except ImportError:
 def create_demo():
     greeting = get_opening_greeting()
     voice_submit = make_voice_submit(transcribe, synthesize) if VOICE_ENABLED else None
+    tts_respond = make_tts_respond(synthesize) if VOICE_ENABLED else None
 
     with gr.Blocks(css=CUSTOM_CSS, title="Mr. House — Lucky 38 Terminal") as demo:
         recorded_audio = gr.State(value=None)
@@ -87,21 +89,31 @@ def create_demo():
                         scale=7,
                     )
                     voice_btn = gr.Button("TRANSMIT\nVOICE", variant="primary", scale=2)
-                voice_output = gr.Audio(
-                    label="Mr. House Speaks",
-                    elem_id="voice-output",
-                    show_label=False,
-                    autoplay=True,
-                    interactive=False,
-                )
 
             clear_btn = gr.Button("[ DISCONNECT ]", variant="secondary", size="sm")
 
+            # Single shared audio output for both text and voice responses
+            tts_audio = gr.Audio(
+                elem_id="tts-output",
+                show_label=False,
+                autoplay=True,
+                interactive=False,
+                visible=VOICE_ENABLED,
+            )
+
+        def _respond_and_tts(chat_history):
+            """Stream bot reply, then synthesize the completed response."""
+            final = chat_history
+            for final in bot_respond(chat_history):
+                yield final, None
+            if tts_respond:
+                yield final, tts_respond(final)
+
         msg.submit(user_submit, [msg, chatbot], [msg, chatbot], queue=False).then(
-            bot_respond, chatbot, chatbot
+            _respond_and_tts, chatbot, [chatbot, tts_audio]
         )
         submit_btn.click(user_submit, [msg, chatbot], [msg, chatbot], queue=False).then(
-            bot_respond, chatbot, chatbot
+            _respond_and_tts, chatbot, [chatbot, tts_audio]
         )
         clear_btn.click(clear_chat, None, chatbot, queue=False)
 
@@ -121,7 +133,7 @@ def create_demo():
             voice_btn.click(
                 voice_submit,
                 [recorded_audio, chatbot],
-                [chatbot, voice_output, mic_input, recorded_audio],
+                [chatbot, tts_audio, mic_input, recorded_audio],
                 queue=False,
             )
 

@@ -56,15 +56,40 @@ def transcribe(audio_filepath: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# TTS (Text-to-Speech) via Piper
+# TTS (Text-to-Speech) via Kokoro — bm_george (British male)
 # ---------------------------------------------------------------------------
 
-VOICE_DIR = Path(__file__).parent / "voices"
-PIPER_VOICE = "en_US-lessac-medium"
+KOKORO_VOICE = "bm_george"
+KOKORO_SPEED = 0.95   # slightly slower = more deliberate/authoritative
+
+_kokoro_pipeline = None
+
+
+def _get_kokoro_pipeline():
+    global _kokoro_pipeline
+    if _kokoro_pipeline is None:
+        from kokoro import KPipeline
+        print("[VOICE] Loading Kokoro pipeline (British English)...", flush=True)
+        _kokoro_pipeline = KPipeline(lang_code="b")  # 'b' = British English
+        print("[VOICE] Kokoro ready.", flush=True)
+    return _kokoro_pipeline
+
+
+def clean_for_tts(text: str) -> str:
+    """Strip stage directions and action descriptions before synthesis.
+
+    Removes patterns like ((leaning forward)), (smiles), *nods*, _quietly_.
+    """
+    import re
+    text = re.sub(r'\(\(.*?\)\)', '', text)   # ((double parens))
+    text = re.sub(r'\(.*?\)', '', text)        # (single parens)
+    text = re.sub(r'\*.*?\*', '', text)        # *asterisks*
+    text = re.sub(r'_.*?_', '', text)          # _underscores_
+    return re.sub(r'\s{2,}', ' ', text).strip()
 
 
 def synthesize(text: str) -> Optional[str]:
-    """Convert text to speech using Piper TTS.
+    """Convert text to speech using Kokoro TTS (bm_george voice).
 
     Args:
         text: The text to speak (Mr. House's response).
@@ -72,35 +97,29 @@ def synthesize(text: str) -> Optional[str]:
     Returns:
         Path to output WAV file, or None on failure.
     """
+    text = clean_for_tts(text)
     if not text or not text.strip():
         return None
 
-    voice_model = VOICE_DIR / f"{PIPER_VOICE}.onnx"
-    voice_config = VOICE_DIR / f"{PIPER_VOICE}.onnx.json"
-
-    if not voice_model.exists():
-        print(f"[VOICE] Piper voice not found at {voice_model}", flush=True)
-        print("[VOICE] Run: bash scripts/install_voice.sh", flush=True)
-        return None
-
-    # Create temp WAV file for output
     tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp_path = tmp.name
     tmp.close()
 
     try:
-        # Use piper Python API — synthesize() is a generator of AudioChunks
-        from piper import PiperVoice
+        import numpy as np
+        import soundfile as sf
 
-        voice = PiperVoice.load(str(voice_model), config_path=str(voice_config))
+        pipeline = _get_kokoro_pipeline()
+        chunks = []
+        for _, _, audio in pipeline(text, voice=KOKORO_VOICE, speed=KOKORO_SPEED):
+            chunks.append(audio)
 
-        import wave
-        with wave.open(tmp_path, "wb") as wav_file:
-            wav_file.setnchannels(1)        # mono
-            wav_file.setsampwidth(2)         # 16-bit PCM
-            wav_file.setframerate(voice.config.sample_rate)
-            for chunk in voice.synthesize(text):
-                wav_file.writeframes(chunk.audio_int16_bytes)
+        if not chunks:
+            print("[VOICE] Kokoro produced no audio chunks", flush=True)
+            return None
+
+        audio = np.concatenate(chunks)
+        sf.write(tmp_path, audio, 24000)
 
         if os.path.getsize(tmp_path) > 0:
             print(f"[VOICE] TTS generated: {tmp_path}", flush=True)
@@ -110,7 +129,7 @@ def synthesize(text: str) -> Optional[str]:
             return None
 
     except ImportError:
-        print("[VOICE] piper-tts not installed. Run: bash scripts/install_voice.sh", flush=True)
+        print("[VOICE] kokoro or soundfile not installed. Run: pip install kokoro soundfile", flush=True)
         return None
     except Exception as e:
         print(f"[VOICE] TTS error: {e}", flush=True)
