@@ -52,16 +52,34 @@ def get_opening_greeting():
     return "You are the first person to step foot inside the Lucky 38 in over 200 years."
 
 
+def _text(content):
+    """Normalize Gradio content (string or list of blocks) to a plain string."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            block.get("text", "") if isinstance(block, dict) else str(block)
+            for block in content
+        )
+    return str(content) if content is not None else ""
+
+
 def chat_with_house(message, history):
     """Send message to Ollama and stream response."""
-    messages = [{"role": "system", "content": "You are Mr. House. Stay in character at all times."}]
+    messages = [{"role": "system", "content": "You are Mr. House. Stay in character at all times. Keep every response under 75 words — make your point once, with authority."}]
 
     for h in history:
-        messages.append({"role": "user", "content": h[0]})
-        if h[1]:
-            messages.append({"role": "assistant", "content": h[1]})
+        if isinstance(h, dict):
+            messages.append({"role": h["role"], "content": _text(h["content"])})
+        else:
+            if h[0]:
+                messages.append({"role": "user", "content": _text(h[0])})
+            if h[1]:
+                messages.append({"role": "assistant", "content": _text(h[1])})
 
-    messages.append({"role": "user", "content": message})
+    # Gradio 6 may return the latest message as rich-content blocks rather than a string.
+    # Ollama's /api/chat expects each message.content to be a plain string.
+    messages.append({"role": "user", "content": _text(message)})
 
     try:
         response = requests.post(
@@ -81,6 +99,8 @@ def chat_with_house(message, history):
                     yield partial
     except requests.ConnectionError:
         yield "[ CONNECTION ERROR: Ollama is not running. Start it with: open -a Ollama ]"
+    except requests.HTTPError as e:
+        yield f"[ ERROR: {str(e)} | body: {e.response.text} ]"
     except Exception as e:
         yield f"[ ERROR: {str(e)} ]"
 
@@ -153,8 +173,16 @@ CUSTOM_CSS = """
 /* Chat area */
 .chatbot {
     background-color: #0d0d00 !important;
-    border: 1px solid #3a3a1a !important;
+    border: 2px solid #4a4a2a !important;
     border-radius: 8px !important;
+    box-shadow: 0 0 20px rgba(200, 170, 50, 0.2) !important;
+}
+
+/* Gradio 6 inner chat wrappers */
+.bubble-wrap,
+.message-wrap,
+.panel-wrap {
+    background-color: #111100 !important;
 }
 
 /* Message bubbles — Gradio 4.x selectors */
@@ -183,7 +211,9 @@ CUSTOM_CSS = """
 textarea {
     background-color: #111100 !important;
     color: #c8aa32 !important;
-    border: 1px solid #3a3a1a !important;
+    border: 2px solid #4a4a2a !important;
+    border-radius: 8px !important;
+    box-shadow: 0 0 20px rgba(200, 170, 50, 0.2) !important;
     font-family: 'Courier New', monospace !important;
 }
 
@@ -191,11 +221,32 @@ textarea::placeholder {
     color: #5a5a2a !important;
 }
 
+#msg-input,
+#msg-input > label,
+#msg-input .input-container,
+#msg-input .input-container > div,
+#msg-input [data-testid="textbox"],
+#msg-input [data-testid="textbox"] textarea,
+#msg-input [data-testid="submit-button"],
+#msg-input [data-testid="stop-button"] {
+    border-color: #4a4a2a !important;
+    box-shadow: 0 0 20px rgba(200, 170, 50, 0.2) !important;
+}
+
 /* Buttons */
 button.primary {
     background-color: #3a3a1a !important;
     color: #c8aa32 !important;
-    border: 1px solid #5a5a2a !important;
+    border: 2px solid #4a4a2a !important;
+    box-shadow: 0 0 20px rgba(200, 170, 50, 0.2) !important;
+    font-family: 'Courier New', monospace !important;
+}
+
+button.secondary {
+    background-color: #1a1a0a !important;
+    color: #c8aa32 !important;
+    border: 2px solid #4a4a2a !important;
+    box-shadow: 0 0 20px rgba(200, 170, 50, 0.2) !important;
     font-family: 'Courier New', monospace !important;
 }
 
@@ -215,12 +266,53 @@ button.primary:hover {
 /* Voice components */
 audio {
     background-color: #111100 !important;
-    border: 1px solid #3a3a1a !important;
+    border: 2px solid #4a4a2a !important;
     border-radius: 4px !important;
+    box-shadow: 0 0 20px rgba(200, 170, 50, 0.2) !important;
+}
+
+#mic-input,
+#mic-input > div,
+#mic-input button,
+#mic-input [data-testid="block-label"],
+#mic-input [data-testid="media-upload"],
+#mic-input [data-testid="audio"],
+#mic-input .record-button,
+#mic-input .stop-button,
+#mic-input .device-select-large {
+    background-color: #000000 !important;
+    color: #c8aa32 !important;
+}
+
+#mic-input {
+    border: 2px solid #4a4a2a !important;
+    border-radius: 8px !important;
+    box-shadow: 0 0 20px rgba(200, 170, 50, 0.2) !important;
+}
+
+#voice-output,
+#voice-output > div,
+#voice-output button,
+#voice-output .record-button,
+#voice-output .stop-button,
+#voice-output .device-select-large {
+    border: 2px solid #4a4a2a !important;
+    border-radius: 8px !important;
+    box-shadow: 0 0 20px rgba(200, 170, 50, 0.2) !important;
+}
+
+#mic-input .record-button,
+#mic-input .stop-button,
+#mic-input .device-select-large,
+#voice-output .record-button,
+#voice-output .stop-button,
+#voice-output .device-select-large {
+    border: 2px solid #4a4a2a !important;
 }
 
 #voice-status {
     color: #5a5a2a;
+    background-color: #111100 !important;
     font-size: 0.7em;
     text-align: center;
     padding: 3px;
@@ -265,6 +357,7 @@ def create_demo():
     greeting = get_opening_greeting()
 
     with gr.Blocks(css=CUSTOM_CSS, title="Mr. House — Lucky 38 Terminal") as demo:
+        recorded_audio = gr.State(value=None)
 
         # Monitor frame
         with gr.Column(elem_id="monitor-frame"):
@@ -282,7 +375,6 @@ def create_demo():
                 value="demo/house_portrait.png",
                 elem_id="house-portrait",
                 show_label=False,
-                show_download_button=False,
                 container=False,
                 interactive=False,
             )
@@ -292,7 +384,7 @@ def create_demo():
 
             # Chat interface
             chatbot = gr.Chatbot(
-                value=[[None, greeting]],
+                value=[{"role": "assistant", "content": greeting}],
                 height=350,
                 show_label=False,
                 container=False,
@@ -302,6 +394,7 @@ def create_demo():
             with gr.Row():
                 msg = gr.Textbox(
                     placeholder="Speak to Mr. House...",
+                    elem_id="msg-input",
                     show_label=False,
                     scale=9,
                     container=False,
@@ -316,12 +409,14 @@ def create_demo():
                         sources=["microphone"],
                         type="filepath",
                         label="Voice Input",
+                        elem_id="mic-input",
                         show_label=False,
                         scale=7,
                     )
                     voice_btn = gr.Button("TRANSMIT\nVOICE", variant="primary", scale=2)
                 voice_output = gr.Audio(
                     label="Mr. House Speaks",
+                    elem_id="voice-output",
                     show_label=False,
                     autoplay=True,
                     interactive=False,
@@ -332,27 +427,28 @@ def create_demo():
 
         # Event handlers
         def user_submit(message, chat_history):
-            chat_history = chat_history + [[message, None]]
+            chat_history = chat_history + [{"role": "user", "content": message}]
             return "", chat_history
 
         def bot_respond(chat_history):
-            message = chat_history[-1][0]
+            last = chat_history[-1]
+            message = last["content"] if isinstance(last, dict) else last[0]
             history = chat_history[:-1]
-            chat_history[-1][1] = ""
+            chat_history = chat_history + [{"role": "assistant", "content": ""}]
             for partial in chat_with_house(message, history):
-                chat_history[-1][1] = partial
+                chat_history[-1]["content"] = partial
                 yield chat_history
 
         def clear_chat():
             new_greeting = get_opening_greeting()
-            return [[None, new_greeting]]
+            return [{"role": "assistant", "content": new_greeting}]
 
         def voice_submit(audio_filepath, chat_history):
             """Handle voice input: transcribe → chat → TTS → audio reply."""
             print(f"[VOICE] voice_submit called, audio={audio_filepath}", flush=True)
             if audio_filepath is None:
                 print("[VOICE] No audio filepath received", flush=True)
-                return chat_history, None, None
+                return chat_history, None, None, None
 
             try:
                 # STT: audio → text
@@ -360,28 +456,32 @@ def create_demo():
                 user_text = transcribe(audio_filepath)
                 if not user_text:
                     print("[VOICE] Transcription returned empty", flush=True)
-                    return chat_history, None, None
+                    return chat_history, None, None, None
 
                 # Add user message to chat history
-                chat_history = chat_history + [[user_text, None]]
+                chat_history = chat_history + [{"role": "user", "content": user_text}]
                 print(f"[VOICE] Sending to LLM: {user_text}", flush=True)
 
                 # Get Mr. House response (non-streaming for TTS)
-                history_for_llm = chat_history[:-1]
-                response = chat_with_house_full(user_text, history_for_llm)
-                chat_history[-1][1] = response
+                response = chat_with_house_full(user_text, chat_history[:-1])
+                chat_history = chat_history + [{"role": "assistant", "content": response}]
                 print(f"[VOICE] LLM response: {response[:80]}...", flush=True)
 
                 # TTS: response text → audio
                 audio_out = synthesize(response)
                 print(f"[VOICE] TTS output: {audio_out}", flush=True)
 
-                return chat_history, audio_out, None  # None clears mic
+                return chat_history, audio_out, None, None  # clear mic + committed path
             except Exception as e:
                 print(f"[VOICE] voice_submit ERROR: {e}", flush=True)
                 import traceback
                 traceback.print_exc()
-                return chat_history, None, None
+                return chat_history, None, None, audio_filepath
+
+        def store_recorded_audio(audio_filepath):
+            """Capture finalized microphone recordings for later submission."""
+            print(f"[VOICE] store_recorded_audio called, audio={audio_filepath}", flush=True)
+            return audio_filepath
 
         # Wire up events
         msg.submit(user_submit, [msg, chatbot], [msg, chatbot], queue=False).then(
@@ -392,13 +492,23 @@ def create_demo():
         )
         clear_btn.click(clear_chat, None, chatbot, queue=False)
 
-        # Voice events — use manual button click (most reliable in Gradio 4.31.5)
-        # Both 'stop_recording' and 'change' events fail to fire from the frontend
         if VOICE_ENABLED:
+            mic_input.stop_recording(
+                store_recorded_audio,
+                mic_input,
+                recorded_audio,
+                queue=False,
+            )
+            mic_input.change(
+                store_recorded_audio,
+                mic_input,
+                recorded_audio,
+                queue=False,
+            )
             voice_btn.click(
                 voice_submit,
-                [mic_input, chatbot],
-                [chatbot, voice_output, mic_input],
+                [recorded_audio, chatbot],
+                [chatbot, voice_output, mic_input, recorded_audio],
                 queue=False,
             )
 
