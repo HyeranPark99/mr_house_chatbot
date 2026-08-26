@@ -22,3 +22,6 @@ training/checkpoints/
 
 # Environment variables
 .env
+
+# Claude Code worktree scratch
+.claude/worktrees/

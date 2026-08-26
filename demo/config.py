@@ -2,6 +2,7 @@
 
 import json
 import random
+import re
 from pathlib import Path
 
 
@@ -11,10 +12,32 @@ OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL_NAME = "mr-house"
 GREETINGS_FILE = PROJECT_ROOT / "data" / "mr_house_greetings.jsonl"
 PORTRAIT_PATH = BASE_DIR / "house_portrait.png"
-SYSTEM_PROMPT = (
+MODELFILE_PATH = BASE_DIR / "Modelfile"
+
+FALLBACK_SYSTEM_PROMPT = (
     "You are Mr. House. Stay in character at all times. "
     "Keep every response under 75 words - make your point once, with authority."
 )
+
+
+def load_system_prompt():
+    """Extract the persona from the Modelfile's SYSTEM block.
+
+    Ollama discards the Modelfile SYSTEM whenever the request supplies its own
+    system message, so the request must always carry the full persona itself.
+    """
+    try:
+        match = re.search(
+            r'SYSTEM\s+"""(.*?)"""', MODELFILE_PATH.read_text(), re.DOTALL
+        )
+        if match:
+            return match.group(1).strip()
+    except OSError:
+        pass
+    return FALLBACK_SYSTEM_PROMPT
+
+
+SYSTEM_PROMPT = load_system_prompt()
 DEFAULT_GREETING = (
     "You are the first person to step foot inside the Lucky 38 in over 200 years. "
     "It was not an invitation I made lightly."

@@ -1,0 +1,5 @@
+gradio>=6.6.0
+requests>=2.32.0
+openai-whisper
+kokoro
+soundfile
