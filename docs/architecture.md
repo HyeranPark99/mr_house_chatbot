@@ -96,6 +96,57 @@ flowchart LR
     style P4 fill:#f8d7da,stroke:#d96b6b
 ```
 
+## Demo Runtime — Chat & Voice Pipeline
+
+Updated 2026-07-06 (latency + prompt quick fixes).
+
+```mermaid
+flowchart LR
+    subgraph Input
+        Text["⌨️ Textbox"]
+        Mic["🎤 Microphone"]
+    end
+
+    Mic -->|WAV| Whisper["Whisper STT\n(base / tiny on Pi)"]
+    Whisper -->|transcript| Prompt
+
+    Text --> Prompt["Build messages\npersona from Modelfile\n+ optional weather context"]
+
+    Prompt -->|streaming /api/chat| Ollama["Ollama\nmr-house (llama3.2:3b)\nnum_ctx 8192"]
+
+    Ollama -->|token stream| Buffer["Sentence buffer\n(splits at . ! ? …\nskips Mr./Dr. abbrevs)"]
+    Buffer -->|full partials| Chat["🖥️ gr.Chatbot\n(streaming text)"]
+    Buffer -->|per sentence| Kokoro["Kokoro TTS\nbm_george, 0.95x"]
+    Kokoro -->|"(24kHz, ndarray) chunks"| Audio["🔊 gr.Audio\n(streaming=True, autoplay)"]
+```
+
+Key design points:
+
+- **Single source of truth for the persona.** `demo/config.py` parses the
+  `SYSTEM """..."""` block out of `demo/Modelfile` at startup and sends it as
+  the request-level system message. This matters because Ollama *replaces* the
+  Modelfile SYSTEM when a request carries its own system message — before this
+  fix the demo silently ran on a 17-word stub prompt instead of the full persona.
+- **Sentence-streaming TTS.** `voice.synthesize_chunk()` returns raw
+  `(sample_rate, ndarray)` audio. `handlers._stream_reply()` watches the LLM
+  token stream, cuts at sentence boundaries (with an abbreviation guard so
+  "Mr. House" doesn't split), and synthesizes each sentence as soon as it is
+  complete. Playback begins after the first sentence rather than after the
+  whole response — the main latency fix.
+- **Model preloading.** Whisper and Kokoro load in a background thread at app
+  startup instead of lazily on the first voice turn.
+- **Weather tool.** Keyword-triggered (`is_weather_query`); live wttr.in data is
+  appended to the system prompt before the request. `resolve_location` always
+  returns a target — an explicit "in <place>" (with trailing time words like
+  "today" stripped, since wttr.in geocodes whatever it is handed), an
+  in-universe alias (New Vegas / the Strip / the Mojave → Las Vegas), or Las
+  Vegas by default. A failed lookup injects an explicit sensors-offline notice
+  so the model reports the gap instead of inventing readings. Both injections
+  restate their directive inline rather than relying on the Modelfile alone —
+  at 3B the model otherwise leaks "the sensors you've provided" and fabricates
+  numbers for uncovered locations. Parsing is covered by
+  `scripts/test_weather.py`. Planned upgrade: native Ollama function calling.
+
 ## Agent Access Matrix
 
 | Artifact | Orchestrator | Curator | Persona QA | Demo App | Fine-tune | Pi Deploy |
