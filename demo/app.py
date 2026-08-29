@@ -3,14 +3,15 @@
 
 import gradio as gr
 
+import threading
+
 from config import PORTRAIT_PATH, get_opening_greeting
 from gradio_patch import apply_patch
 from handlers import (
-    bot_respond,
     clear_chat,
-    make_tts_respond,
+    log_mic_change,
+    make_respond_stream,
     make_voice_submit,
-    store_recorded_audio,
     user_submit,
 )
 from theme import CUSTOM_CSS
@@ -19,25 +20,25 @@ from theme import CUSTOM_CSS
 apply_patch()
 
 try:
-    from voice import transcribe, synthesize
+    from voice import preload, synthesize_chunk, transcribe
 
     VOICE_ENABLED = True
-    print("[VOICE] Voice I/O enabled (Whisper STT + Piper TTS)")
-except ImportError:
+    print("[VOICE] Voice I/O enabled (Whisper STT + Kokoro TTS)")
+    # Load Whisper/Kokoro in the background so the first turn isn't slow
+    threading.Thread(target=preload, daemon=True).start()
+except ImportError as exc:
     transcribe = None
-    synthesize = None
+    synthesize_chunk = None
     VOICE_ENABLED = False
-    print("[VOICE] Voice I/O disabled (dependencies not installed)")
+    print(f"[VOICE] Voice I/O disabled — {exc}")
 
 
 def create_demo():
     greeting = get_opening_greeting()
-    voice_submit = make_voice_submit(transcribe, synthesize) if VOICE_ENABLED else None
-    tts_respond = make_tts_respond(synthesize) if VOICE_ENABLED else None
+    respond_stream = make_respond_stream(synthesize_chunk if VOICE_ENABLED else None)
+    voice_submit = make_voice_submit(transcribe, synthesize_chunk) if VOICE_ENABLED else None
 
     with gr.Blocks(css=CUSTOM_CSS, title="Mr. House — Lucky 38 Terminal") as demo:
-        recorded_audio = gr.State(value=None)
-
         with gr.Column(elem_id="monitor-frame"):
             gr.HTML(
                 """
@@ -77,7 +78,7 @@ def create_demo():
 
             if VOICE_ENABLED:
                 gr.HTML(
-                    '<div id="voice-status">[ VOICE COMMS AVAILABLE — RECORD, THEN CLICK TRANSMIT VOICE ]</div>'
+                    '<div id="voice-status">[ VOICE COMMS AVAILABLE — RECORD AND PRESS STOP TO TRANSMIT ]</div>'
                 )
                 with gr.Row():
                     mic_input = gr.Audio(
@@ -92,49 +93,41 @@ def create_demo():
 
             clear_btn = gr.Button("[ DISCONNECT ]", variant="secondary", size="sm")
 
-            # Single shared audio output for both text and voice responses
+            # Single shared audio output for both text and voice responses.
+            # streaming=True plays sentence chunks as they are synthesized.
             tts_audio = gr.Audio(
                 elem_id="tts-output",
                 show_label=False,
+                streaming=True,
                 autoplay=True,
                 interactive=False,
                 visible=VOICE_ENABLED,
             )
 
-        def _respond_and_tts(chat_history):
-            """Stream bot reply, then synthesize the completed response."""
-            final = chat_history
-            for final in bot_respond(chat_history):
-                yield final, None
-            if tts_respond:
-                yield final, tts_respond(final)
-
         msg.submit(user_submit, [msg, chatbot], [msg, chatbot], queue=False).then(
-            _respond_and_tts, chatbot, [chatbot, tts_audio]
+            respond_stream, chatbot, [chatbot, tts_audio]
         )
         submit_btn.click(user_submit, [msg, chatbot], [msg, chatbot], queue=False).then(
-            _respond_and_tts, chatbot, [chatbot, tts_audio]
+            respond_stream, chatbot, [chatbot, tts_audio]
         )
         clear_btn.click(clear_chat, None, chatbot, queue=False)
 
         if VOICE_ENABLED:
-            mic_input.stop_recording(
-                store_recorded_audio,
-                mic_input,
-                recorded_audio,
-                queue=False,
-            )
-            mic_input.change(
-                store_recorded_audio,
-                mic_input,
-                recorded_audio,
-                queue=False,
+            # Diagnostic only — confirms recordings reach the server
+            mic_input.change(log_mic_change, mic_input, None)
+            # Auto-submit when the recording is finalized (.input fires on
+            # user-made changes only, so clearing the mic from voice_submit's
+            # own output does not re-trigger it). The button stays as a
+            # manual fallback; both read the mic component directly.
+            mic_input.input(
+                voice_submit,
+                [mic_input, chatbot],
+                [chatbot, tts_audio, mic_input],
             )
             voice_btn.click(
                 voice_submit,
-                [recorded_audio, chatbot],
-                [chatbot, tts_audio, mic_input, recorded_audio],
-                queue=False,
+                [mic_input, chatbot],
+                [chatbot, tts_audio, mic_input],
             )
 
     return demo

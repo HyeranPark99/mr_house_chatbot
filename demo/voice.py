@@ -1,15 +1,26 @@
 """Voice I/O module for Mr. House chatbot.
 
 STT: OpenAI Whisper (base on Mac, tiny on Pi 5)
-TTS: Piper TTS (en_US-lessac-medium voice)
+TTS: Kokoro (bm_george British male voice)
 """
 
 import os
 import platform
 import subprocess
 import tempfile
+import threading
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Optional
+
+# Fail fast at import so app.py disables voice when deps are missing,
+# instead of every lazy import failing silently at synthesis time.
+_missing = [m for m in ("whisper", "kokoro", "soundfile") if find_spec(m) is None]
+if _missing:
+    raise ImportError(
+        f"Voice deps missing from this Python env: {', '.join(_missing)}. "
+        "Run: pip install openai-whisper kokoro soundfile"
+    )
 
 # Ensure Homebrew binaries (ffmpeg) are on PATH for subprocess calls
 os.environ["PATH"] = "/opt/homebrew/bin:" + os.environ.get("PATH", "")
@@ -19,17 +30,19 @@ os.environ["PATH"] = "/opt/homebrew/bin:" + os.environ.get("PATH", "")
 # ---------------------------------------------------------------------------
 
 _whisper_model = None
+_whisper_lock = threading.Lock()
 
 
 def get_whisper_model():
     """Lazy-load Whisper model. Uses 'tiny' on ARM (Pi 5), 'base' elsewhere."""
     global _whisper_model
-    if _whisper_model is None:
-        import whisper
-        model_size = "tiny" if platform.machine() == "aarch64" else "base"
-        print(f"[VOICE] Loading Whisper '{model_size}' model...", flush=True)
-        _whisper_model = whisper.load_model(model_size)
-        print(f"[VOICE] Whisper ready.", flush=True)
+    with _whisper_lock:  # preload thread and first request may race
+        if _whisper_model is None:
+            import whisper
+            model_size = "tiny" if platform.machine() == "aarch64" else "base"
+            print(f"[VOICE] Loading Whisper '{model_size}' model...", flush=True)
+            _whisper_model = whisper.load_model(model_size)
+            print(f"[VOICE] Whisper ready.", flush=True)
     return _whisper_model
 
 
@@ -63,15 +76,17 @@ KOKORO_VOICE = "bm_george"
 KOKORO_SPEED = 0.95   # slightly slower = more deliberate/authoritative
 
 _kokoro_pipeline = None
+_kokoro_lock = threading.Lock()
 
 
 def _get_kokoro_pipeline():
     global _kokoro_pipeline
-    if _kokoro_pipeline is None:
-        from kokoro import KPipeline
-        print("[VOICE] Loading Kokoro pipeline (British English)...", flush=True)
-        _kokoro_pipeline = KPipeline(lang_code="b")  # 'b' = British English
-        print("[VOICE] Kokoro ready.", flush=True)
+    with _kokoro_lock:  # preload thread and first request may race
+        if _kokoro_pipeline is None:
+            from kokoro import KPipeline
+            print("[VOICE] Loading Kokoro pipeline (British English)...", flush=True)
+            _kokoro_pipeline = KPipeline(lang_code="b")  # 'b' = British English
+            print("[VOICE] Kokoro ready.", flush=True)
     return _kokoro_pipeline
 
 
@@ -88,26 +103,24 @@ def clean_for_tts(text: str) -> str:
     return re.sub(r'\s{2,}', ' ', text).strip()
 
 
-def synthesize(text: str) -> Optional[str]:
-    """Convert text to speech using Kokoro TTS (bm_george voice).
+KOKORO_SAMPLE_RATE = 24000
+
+
+def synthesize_chunk(text: str):
+    """Convert a piece of text (typically one sentence) to raw audio.
 
     Args:
-        text: The text to speak (Mr. House's response).
+        text: The text to speak.
 
     Returns:
-        Path to output WAV file, or None on failure.
+        (sample_rate, np.ndarray) tuple for streaming playback, or None.
     """
     text = clean_for_tts(text)
-    if not text or not text.strip():
+    if not text:
         return None
-
-    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    tmp_path = tmp.name
-    tmp.close()
 
     try:
         import numpy as np
-        import soundfile as sf
 
         pipeline = _get_kokoro_pipeline()
         chunks = []
@@ -118,21 +131,54 @@ def synthesize(text: str) -> Optional[str]:
             print("[VOICE] Kokoro produced no audio chunks", flush=True)
             return None
 
+        # int16 keeps Gradio from re-normalizing each chunk by its own peak,
+        # which would make quiet sentences suddenly loud between chunks.
         audio = np.concatenate(chunks)
-        sf.write(tmp_path, audio, 24000)
-
-        if os.path.getsize(tmp_path) > 0:
-            print(f"[VOICE] TTS generated: {tmp_path}", flush=True)
-            return tmp_path
-        else:
-            print("[VOICE] TTS produced empty file", flush=True)
-            return None
-
+        audio = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
+        return KOKORO_SAMPLE_RATE, audio
     except ImportError:
-        print("[VOICE] kokoro or soundfile not installed. Run: pip install kokoro soundfile", flush=True)
+        print("[VOICE] kokoro not installed. Run: pip install kokoro soundfile", flush=True)
         return None
+    except Exception as e:
+        print(f"[VOICE] TTS error: {e}", flush=True)
+        return None
+
+
+def synthesize(text: str) -> Optional[str]:
+    """Convert text to speech and write it to a WAV file.
+
+    Args:
+        text: The text to speak (Mr. House's response).
+
+    Returns:
+        Path to output WAV file, or None on failure.
+    """
+    chunk = synthesize_chunk(text)
+    if chunk is None:
+        return None
+
+    sample_rate, audio = chunk
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+
+    try:
+        import soundfile as sf
+
+        sf.write(tmp_path, audio, sample_rate)
+        print(f"[VOICE] TTS generated: {tmp_path}", flush=True)
+        return tmp_path
     except Exception as e:
         print(f"[VOICE] TTS error: {e}", flush=True)
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
         return None
+
+
+def preload():
+    """Eagerly load the Whisper and Kokoro models to avoid first-turn lag."""
+    try:
+        get_whisper_model()
+        _get_kokoro_pipeline()
+    except Exception as e:
+        print(f"[VOICE] Preload error: {e}", flush=True)

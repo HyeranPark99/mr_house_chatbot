@@ -5,6 +5,14 @@
 
 An AI chatbot that embodies Mr. House's personality from Fallout: New Vegas — calculating, eloquent, and obsessed with technological progress. Built using a multi-agent pipeline, LoRA fine-tuning, and deployed on a Raspberry Pi.
 
+## UI Reference
+
+The [Host Terminal concept](docs/ui-reference/README.md) is an interactive,
+self-contained HTML reference for the wearable 480 × 320 interface. Open
+[`host-terminal.html`](docs/ui-reference/host-terminal.html) directly in a browser
+to explore the animated portrait, text responses, simulated voice mode, display
+tints, scanlines, and motion settings.
+
 ---
 
 ## Architecture

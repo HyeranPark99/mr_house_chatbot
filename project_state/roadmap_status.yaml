@@ -1,5 +1,5 @@
 project: mr-house-chatbot
-last_updated: "2026-02-25"
+last_updated: "2026-08-25"
 current_phase: 3
 current_focus: "Phase 3 — LoRA fine-tuning with Llama 3.2 3B"
 
@@ -57,7 +57,7 @@ phases:
       - id: 2B.1
         task: "Install voice dependencies (Whisper STT + Piper TTS)"
         status: completed
-        notes: "openai-whisper + piper-tts + en_US-lessac-medium voice model (60MB)"
+        notes: "openai-whisper + piper-tts + en_US-lessac-medium voice model (60MB). TTS later switched to Kokoro (bm_george British male, speed 0.95)"
       - id: 2B.2
         task: "Add voice I/O to Gradio app"
         status: completed
@@ -66,6 +66,77 @@ phases:
         task: "Test voice loop end-to-end"
         status: completed
         notes: "TTS verified (276KB output), app loads with VOICE_ENABLED=True, API OK"
+      - id: 2B.4
+        task: "Latency + prompt quick fixes (sentence-streaming TTS, persona restore)"
+        status: in_progress
+        notes: >-
+          2026-07-06 changes: (1) Found that Ollama drops the Modelfile SYSTEM
+          whenever the request sends its own system message — the demo had been
+          running on the thin 17-word prompt in config.py, not the full persona.
+          config.py now extracts the persona from demo/Modelfile (single source
+          of truth) and sends it on every request. (2) num_ctx raised 2048→8192
+          so history is no longer truncated. (3) TTS now streams sentence-by-
+          sentence: voice.synthesize_chunk() returns raw audio, handlers split
+          the LLM stream at sentence boundaries (with Mr./Dr. abbreviation
+          guard), and gr.Audio(streaming=True) plays chunks as they arrive —
+          playback starts after the first sentence instead of after the full
+          reply. (4) Whisper + Kokoro preload in a background thread at app
+          startup. (5) requirements.txt gained openai-whisper; stale Piper
+          references fixed. Ollama model rebuilt from updated Modelfile.
+          2026-07-07 bugfix: KeyError in Gradio end_stream() — app was run
+          from conda py312 env which lacks whisper/kokoro/soundfile; lazy
+          imports made VOICE_ENABLED=True anyway, every synth returned None,
+          and a streaming Audio run with zero chunks crashes Gradio. Fixes:
+          voice.py raises ImportError at import when deps missing (app
+          disables voice cleanly), handlers always emit >=1 chunk (silence
+          fallback), voice_submit prefers live mic value over stored state.
+          App must run from .venv (or install voice deps into conda env).
+          2026-07-07 voice rewiring: mic recordings never reached the server
+          via the State relay (no store_recorded_audio logs). Replaced with
+          the documented pattern — mic_input.input auto-submits on stop, the
+          TRANSMIT VOICE button reads mic_input directly as fallback, State
+          removed. TTS chunks now int16 (stops Gradio per-chunk peak
+          normalization = volume pumping, and NaN warnings from all-zero
+          silence). Thread lock on Whisper/Kokoro lazy init (preload thread
+          raced first request, loading Kokoro twice). mic_input.change now
+          logs diagnostics only.
+          2026-07-07 verification: reproduced record->stop->transmit in
+          headless Chromium with a fake microphone (Playwright) against the
+          live app — upload 200, .input auto-fired, Whisper ran, mic
+          cleared. Voice pipeline confirmed working server-side; the
+          user's remaining failure is client-side (browser cache, mic
+          permission, or non-localhost origin blocking getUserMedia).
+
+  phase_2c_weather:
+    name: "Live Weather Tool"
+    status: completed
+    owner: demo_agent
+    tasks:
+      - id: 2C.1
+        task: "Fetch live weather and answer in Mr. House's voice"
+        status: completed
+        output: demo/weather.py
+        notes: >-
+          wttr.in (no API key). demo/chat.py injects an [ATMOSPHERIC SENSORS]
+          block into the system prompt when is_weather_query() matches.
+      - id: 2C.2
+        task: "Harden location resolution and grounding"
+        status: completed
+        output: scripts/test_weather.py
+        notes: >-
+          2026-08-25. Fixes on top of the initial feature: (1) trailing time
+          words leaked into the geocode ("Seoul today" resolved to an unrelated
+          district) — _clean_location strips them; (2) queries with no location
+          fetched nothing — resolve_location defaults to Las Vegas and maps
+          in-universe aliases (New Vegas / the Strip / the Mojave); (3) the
+          readout was labeled with wttr.in's nearest station ("Chongdong" for
+          Seoul) — now labeled with the queried place; (4) a failed lookup was
+          silent and the model invented pressure/dew-point figures — a
+          sensors-offline notice is now injected with an absolute no-numbers
+          directive; (5) the model leaked "the sensors you've provided" — both
+          injections restate the directive inline, plus a LIVE TELEMETRY block
+          in demo/Modelfile. Verified end-to-end against Ollama; 27/27 parsing
+          checks pass via scripts/test_weather.py. Model rebuilt from Modelfile.
 
   phase_3_finetune:
     name: "Fine-Tuning with LoRA"

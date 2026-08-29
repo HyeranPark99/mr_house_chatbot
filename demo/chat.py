@@ -5,7 +5,13 @@ import json
 import requests
 
 from config import MODEL_NAME, OLLAMA_URL, SYSTEM_PROMPT
-from weather import extract_location, fetch_weather, format_weather_context, is_weather_query
+from weather import (
+    fetch_weather,
+    format_sensor_failure,
+    format_weather_context,
+    is_weather_query,
+    resolve_location,
+)
 
 
 def normalize_text(content):
@@ -23,21 +29,24 @@ def normalize_text(content):
 def build_messages(message, history):
     """Build an Ollama-compatible chat payload from Gradio history.
 
-    If the message is a weather query with a location, injects live weather
-    data into the system prompt before sending to Ollama.
+    If the message is a weather query, injects live telemetry for the named
+    location (or New Vegas by default) into the system prompt before sending
+    to Ollama. A failed lookup injects an explicit sensors-offline note so the
+    model reports the gap rather than inventing numbers.
     """
     system_prompt = SYSTEM_PROMPT
     text = normalize_text(message)
 
     if is_weather_query(text):
-        location = extract_location(text)
-        if location:
-            weather = fetch_weather(location)
-            if weather:
-                system_prompt += "\n\n" + format_weather_context(weather)
-                print(f"[WEATHER] Injected: {format_weather_context(weather)}", flush=True)
-            else:
-                print(f"[WEATHER] Could not fetch weather for '{location}'", flush=True)
+        location = resolve_location(text)
+        weather = fetch_weather(location)
+        context = (
+            format_weather_context(weather)
+            if weather
+            else format_sensor_failure(location)
+        )
+        system_prompt += "\n\n" + context
+        print(f"[WEATHER] Injected: {context}", flush=True)
 
     messages = [{"role": "system", "content": system_prompt}]
 
