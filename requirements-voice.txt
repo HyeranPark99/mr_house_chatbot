@@ -1,0 +1,6 @@
+# Optional voice I/O (Whisper STT + Kokoro TTS). Whisper also needs ffmpeg on PATH.
+-r requirements.txt
+openai-whisper
+kokoro
+soundfile
+numpy
